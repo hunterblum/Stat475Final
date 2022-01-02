@@ -1,0 +1,345 @@
+---
+title: "What Makes an NFL Playoff Team? An Analysis and Prediction of NFL Playoff Teams."
+author: "Hunter Blum"
+date: "11/19/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## Introduction
+
+According to USA Today, the NFL is the most valuable sports league in the world, generating 16 billion dollars in revenue last year (Colangelo, 2019). With so much money on the line, it is imperative that teams are able to be the best possible, in order to increase popularity and revenue. But what position should teams invest money into? The historic answer has been positions such as quarterback and defenesive end, but does the math work out?
+
+In this project, I will be analyzing a few questions to hopefully help NFL general managers and sports bettors alike. First, I will be scrutinizing the age-old talking point that special teams can make or break a season for a team. Then I will analyze which stats, and therefore positions, are most indicative of a playoff team. Finally, I will create a model to predict which teams will make the playoffs based on team statistics. This model will not account for wins, allowing its predicative ability to be used in the preseason by simply making the necessary additions and subtractions to each teams roster, and recalcuating all of their statistics. 
+
+## The Data
+
+The data for this project was scraped from pro-football-reference.com on November 19, 2020. The code for scraping the data can be found in the FinalNFLScrape.rmd file included in the project submission. The data includes a multitude of team statistics from each NFL season dating from 1970 until the date of the most recent web scrape. An explanation of each variable within the data can be found within the NFL Dataset Variable Key word file included in the project submission. 
+
+```{r}
+# Original Data
+NFL <- read.csv("NFL.csv")
+
+# Libraries Used
+library(plyr)
+library(car)
+library(DescTools)
+library(vegan)
+library(fpc)
+library(biotools)
+library(Hotelling)
+library(tidyverse)
+```
+
+## Cleaning the Data
+
+I started by removing the variable TB. (touchback percentage), KOAvg (kickoff average), and DefPercentScore, since they were not recorded until the late 1980s. In preliminary statistical tests, some of my variables were highly correlated to each other, so I chose the variable that was more simple (if both were based on an equation such as passing touchdowns per game (PassTDG) vs. percent of throws that are passing touchdowns (PassTD)). I also did some cleaning to the variable names to remove periods and removed the percentage sign for some variables, so they could be stored as numeric. Finally, I split the dataset to store 2020 in a seperate dataframe. This way the data used for analysis is 100% accurate on who is and is not a playoff team (since we are only about halfway through this NFL season and do not know the actual playoff teams yet).
+
+```{r}
+
+NFL$FG. <- NFL$FG. %>% str_remove("%")
+NFL$XP. <- NFL$XP. %>% str_remove("%")
+NFL <- NFL %>% rename(FG=FG., XP= XP., PassCmp=PassCmp., PassTD=PassTD., PassSack=PassSack., TB=TB.)
+NFL$FG <- as.numeric(NFL$FG)
+NFL$XP <- as.numeric(NFL$XP)
+
+NFL$TB <- NULL
+NFL$KOAvg <- NULL
+NFL$DefPercentScore <- NULL
+
+# What I used to assess the highest correlation between variables. I removed variables one at a time, then decreased the amount of variables in my code, removing variables until the data set worked for my tests. 
+
+NFL2 <- NFL[,7:56]
+z <- cor(NFL2)
+z[lower.tri(z,diag=TRUE)]=NA  
+z=as.data.frame(as.table(z))  
+z=na.omit(z) 
+z=z[order(-abs(z$Freq)),]    
+z
+
+# Variables that I removed because of high correlations or being based on a single play.  
+
+NFL$PassYds7G <- NULL
+NFL$PassANY.A <- NULL
+NFL$PassRate <- NULL
+NFL$DefPassFDG <- NULL
+NFL$PassNY.A <- NULL
+NFL$DefNY.A <- NULL
+NFL$DefRushFDG <- NULL
+NFL$PassSack <- NULL
+NFL$PassYds19G <- NULL
+NFL$PassTD <- NULL
+NFL$DefCmpG <- NULL
+NFL$PassY.A <- NULL
+NFL$DefIntG <- NULL
+NFL$RushAttG <- NULL
+NFL$DefPenYdsG <- NULL
+NFL$PassAttG <- NULL
+NFL$APYd <- NULL
+NFL$PuntRetLng <- NULL
+NFL$PassLng <- NULL
+NFL$RushLng <- NULL
+NFL$KickRetLng <- NULL
+NFL$FGLng <- NULL
+
+# Splitting between 2019 and 2020
+NFL2020 <- NFL %>% filter(Year==2020)
+NFL <- NFL %>% filter(Year!=2020)
+
+```
+## Hotellings T2: Does special teams matter?
+
+Often times announcers will bring particular attention to special teams, especially when there is a mistake on a play. This is usually followed by a statement of how special teams makes or breaks a team's success. So, I performed a Hotellings T2 test to determine if the mean special teams stats varied between playoff and non-playoff teams. My null hypothesis is that playoff and non-playoffs have equal stats across the special teams categories. My alternative hypothesis is that the mean special teams stats differ between playoff and non-playoff teams. 
+
+The test returned a statistic of 7.86 and a p-value of 2.3x10^-9 at seven and 1469 degrees of freedom. Since the test returned a significant p-value, we can reject the null hypothesis and conclude that playoff teams and non-playoff teams differ significantly in their special team statistics. 
+```{r}
+NFLSpecialTeams <- NFL %>% dplyr::select(Playoffs, PuntYds.R:KickRetTDG, FG:Yds.Punt)
+
+T2Test <- hotelling.test(.~Playoffs, data=NFLSpecialTeams)
+T2Test
+
+```
+
+## MANOVA with Bonferroni Confidence Intervals
+
+I performed a MANOVA to determine if there was a difference in the team statistics between playoff teams and non-playoff teams. The null-hypothesis for my MANOVA is that there is no difference between playoff and non-playoff teams in my chosen stats, while the alternative hypothesis is that there is at least one statistic that is significantly different between playoff and non-playoff teams. My MANOVA returned a Wilks-lambda test statistic of .50 with a p-value of 2.22x10^-16 at 30 and 1446 degrees of freedom. Since the test was significant, we can conclude that at least one of the statistics is significantly different between playoff and non-playoff teams. 
+
+My Bonferroni simultaneous confidence intervals returned 24 of my variables that were significantly different between playoff and non-playoff teams. A synopsis of my findings can be found in the graph below. Any stat with its bar within the green represents a team stat that favors a playoff team. For example, playoff teams have about 15 to 22.5 more APYdG (all purpose yards per game) than non-playoff teams. While non-playoff teams appear to give up around 2 to 2.5 more first downs per game (DefFirstDownG) than playoff teams. Keep in mind the data is not standardized in order to preserve the orignial units of the statistic. 
+```{r}
+
+# MANOVA
+NFLMan <- NFL %>% select(6:36)
+NFLMan$Playoffs <- as.factor(NFLMan$Playoffs)
+
+fit.lm <- lm(cbind(PassCmp, PassAY.A, PassY.C, PassY.G, PassTDG, PassIntG, PassSackG, RushY.A, RushY.G, RushTDG, RushFmbG, PuntYds.R, KickYds.R, PuntRetTDG, KickRetTDG, APYdG, FG, XP, Yds.Punt, DefY.P, DefRushY.A, DefPAG, DefTOG, DefFirstDownG, DefPassYdsG, DefPassTDG, DefRushYdsG, DefRushTDG, DefPenG, DefPenFirstG)~Playoffs, data=NFLMan)
+
+fit.manova <- Manova(fit.lm)
+summary(fit.manova)
+
+# Automated Bonferroni confidence intervals
+NFLIntervals <- c()
+for(i in NFLMan[,2:31]) {
+res <- aov(formula = i ~ Playoffs, data=NFLMan)
+CI <- PostHocTest(res, method = "bonferroni")
+df<- data.frame(matrix(unlist(CI), nrow = length(CI), byrow=T))
+
+
+NFLIntervals <- rbind(NFLIntervals, df)
+}
+
+
+Variables <- colnames(NFLMan[,2:31])
+NFLIntervals$variable <- Variables
+names(NFLIntervals) <- c("diff", "lower", "upper", "pval", "variable")
+
+
+NFLIntervalsSig <- NFLIntervals %>% mutate(LowerCheck=ifelse(NFLIntervals$lower<0, -1, 1)) 
+
+NFLIntervalsSig <- NFLIntervalsSig %>% mutate(UpperCheck=ifelse(NFLIntervals$upper<0, -1, 1))
+
+NFLIntervalsSig <- NFLIntervalsSig %>% mutate(Direction= LowerCheck + UpperCheck)
+
+NFLIntervalsSig <- NFLIntervalsSig %>% filter(Direction!=0)  %>%  mutate(PlayoffVsNo = ifelse(Direction>0, "Playoffs", "No"))
+
+NFLIntervalsSig 
+
+segment_data = data.frame(
+  x=c(NFLIntervalsSig$variable),
+  xend=c(NFLIntervalsSig$variable),
+  y=c(NFLIntervalsSig$lower), 
+  yend=c(NFLIntervalsSig$upper)
+)
+
+
+
+# Visualization of confidence intervals
+ggplot(NFLIntervalsSig, aes(y=variable)) +
+  geom_segment(aes(x=lower, xend= upper, y=variable, yend= variable), size=4) +
+geom_rect(aes(linetype= "Playoffs",xmin=0, xmax=Inf, ymin= -Inf, ymax= Inf,), fill="green", alpha=.03) +
+  geom_rect(aes(linetype= "Not in Playoffs",xmin=-Inf, xmax=0, ymin=-Inf, ymax=Inf), fill="red", alpha=.03) + 
+  ylab("Statistic") + xlab("")  + scale_linetype_manual(values=c("Playoffs"=0, "Not in Playoffs"=0), name="Playoff Status", guide=guide_legend(override.aes = list(fill= c("red", "green"), alpha=.4))) + ggtitle("Bonferroni Simultaneous Confidence Intervals")
+  
+
+```
+
+
+
+
+
+# Principal Component Analysis
+
+I have decided to use the first eight principal components of my analysis to create a reduced dataset. My scree plot begins to level off around the eighth PC and the eight PC marks where 70% of the of the variance is explained. 
+
+The first principal component appears to be a contrast between a mixture of variables that do not make much contextual sense when combined together. For example, DefTOG (turnovers taken by the defense) is without a doubt a positive statistic, however, it is given almost the same PC score and RushFmbG (rushing fumbles per game) which is a clear negative statistic. PC2 appears to be contrasting major offensive a defensive categories such as DefPAG (defensive points allowed per game) and PassAY.A (adjusted pass yards per attempt). The thrid PC is a combination of offensive statistics such as PassY.C (pass yards per completion) and defensive statistics such as DefRushTDG (rushing touchdowns given up by the defense per game). The fourth prinicpal component is a contrast between passing statistics and special teams statistics. PC 5 is a summation of punt return statistics, likely serving as a stand in to field position. PC 6 is another contrast that contextually does not make sense, like the first PC. The seventh PC is expalined by kick return yards and touchdowns. Finally, the eight PC is a contrast between defensive penalty statistics and extra point percentage. 
+
+I am not sure that this principal component analysis will be effective in helping reduce dimensions, since it takes many PCs to even get to 70% variance explained. To further evidence this, a plot of PC1 vs PC2 colored by whether the team does or does not make the playoffs does not show a definitive split between the two groups. However, I will continue to explore using both my raw data and PCA data (stored in NFLReduced) in subsequent analyses. 
+```{r}
+NFL3 <- NFL[,7:36]
+NFL3 <- scale(NFL3, center = T, scale=T)
+NFL.pc <- prcomp(NFL3)
+summary(NFL.pc)
+NFL.pc$rotation
+
+plot(NFL.pc$sdev^2, xlab = "Component Number", ylab = "Component Variance (eigenvalue)", main = "Scree Diagram", type = "l")
+
+qplot(NFL.pc$x[,1], NFL.pc$x[,2], col = as.factor(NFL$Playoffs)) + scale_color_manual(values = c("red", "blue"), name = "Playoff Status", labels = c("No", "Yes")) + xlab("PC 1") + ylab("PC 2")
+
+NFLReduced <- data.frame(NFL.pc$x[,1:8])
+NFLReduced <- cbind(NFLReduced, NFL$Playoffs)
+
+
+```
+
+# Cluster Analysis
+
+I chose to do K-means clustering in hopes to create defined tiers of teams that have a chance of making the playoffs. For both by raw and prinicpal component data, I began by looking at the between/total sum of square ratio. Based on the graphs and returns for this ratio, I determined that five clusters were the optimal amount, since there is an "elbow" at five clusters. Both of my cluster plots do not show a large amount of seperation between groups.
+In order to determine if my clusters were effective at distinguishing playoff versus non-playoff teams, I compared the playoff status of teams within each cluster in a bar chart. For the raw data, the clusters do not do a great job at distinguishing playoff teams. Only cluster three has more playoff teams in it than non-playoff teams. However, cluster one and four appear to be made up of mostly non-playoff teams which make this a little useful. The principal component data provides much more useful clusters. As the cluster number increases it is clear that the chance of a team being in the playoffs goes down. However, I am still not confident on using these clusters to give a definite prediction on future NFL playoff teams. 
+```{r}
+NFLClust <- NFL[,7:36]
+NFLClust2 <- NFLReduced[,1:8]
+
+
+
+# K-Means Clustering on Raw Data
+
+kmratio <- sapply(2:10, function(x)
+  {NFL.km <- kmeans(NFLClust,x)
+  NFL.km$betweenss/NFL.km$totss})
+kmratio
+
+plot(2:10, kmratio, xlab = "Number of Clusters for Raw Data", ylab = "betweenSS/totalSS",main="K-means Clustering on Raw Data", cex=1.2, pch=5) +
+lines(spline(2:10, kmratio))   
+
+set.seed(123456789)
+NFL.km <- kmeans(NFLClust, 5)
+NFL.km
+
+vcol <- c("blue", "green", "purple", "red", "orange", "black")
+plotcluster(NFLClust, NFL.km$cluster, method="dc", cex=.5, pch = 16, col=vcol[NFL.km$cluster], main = "Clusters for Raw Data")
+
+
+
+# K-Means clustering on Principal Component Data
+
+kmratio2 <- sapply(2:10, function(x)
+  {NFL.km <- kmeans(NFLClust2,x)
+  NFL.km$betweenss/NFL.km$totss})
+kmratio2
+
+plot(2:10, kmratio2, xlab = "Number of Clusters on PC Data", ylab = "betweenSS/totalSS",main="K-means Clustering", cex=1.2, pch=5) +
+lines(spline(2:10, kmratio2))   
+
+set.seed(123456789)
+NFL.km2 <- kmeans(NFLClust2, 5)
+NFL.km2
+
+vcol <- c("blue", "green", "purple", "red", "orange", "black")
+plotcluster(NFLClust2, NFL.km2$cluster, method="dc", cex=.5, pch = 16, col=vcol[NFL.km2$cluster], main= "Clusters for PC Data") 
+
+# Experimenting
+
+names <- c("Playoffs", "Raw", "PC")
+
+Cluster <- data.frame(cbind(NFL[,6],NFL.km$cluster, NFL.km2$cluster))
+
+colnames(Cluster) <- names
+Cluster$Playoffs <- as.factor(Cluster$Playoffs)
+Cluster$Playoffs <- revalue(Cluster$Playoffs,c("0"="No", "1"="Playoffs"))
+
+
+
+ggplot(Cluster, aes(x=Raw, fill=Playoffs)) + geom_bar(position = "dodge") + xlab("Cluster") + ggtitle("Cluster Grouping for Raw Data") 
+
+ggplot(Cluster, aes(x=PC, fill=Playoffs)) + geom_bar(position="dodge") + xlab("Cluster") + ggtitle("Cluster Grouping for PC Data")
+
+```
+
+# Discriminant Analysis
+
+For my discriminant analyses, I began by performing a box M-test to see if I should consider using a quadratic discriminant as well. Both of the box M-tests returned a signficant value meaning that I will be considering a quadratic disriminant when doing my analysis. I then calculated the historic probability of a team making the playoffs, seen in PlayoffRatioAllTime to use as one of my priors. Next, I used the current odds of making the playoffs 14/32 as another prior to evaluate. Then, I used a 2/3 sized sample of teams that did and did not make the playoffs to create a training index. I used this training index and my priors to create a loop. This loop was ran 100 times, and the mean testing error for each test was collected. I found that the linear discriminant always had a lower testing error, and the historic playoff ratio prior always provided the lowest testing error. However, I will be selecting the analyses with the new playoff ratio, as it only has around .5% more error, and is more applicable to today's NFL playoff situation. 
+
+Using my second discriminant analysis, I plugged in my dataset for NFL teams this season to create playoff predictions. Based on current NFL standings (as of week 11 in the season), the predictions were very successful. Each team that is listed is currently in a playoff spot, although there are some ties. The only issue with my predictions is that it only has 13 teams making the playoffs rather than 14. This can be explained by the fact my data does not take into account divisions or conferences. 
+In the NFL seven teams make the playoffs from each conference. Each conference has four divisions in which each division winner is awarded an automatic playoff bid. The remaining spots are given to the three teams with the next best records, known as wildcard teams. My analysis did place seven teams in the playoffs for one conference, the AFC, however, the NFC only had six. This can be explained by the one division, the NFC East. Comprised of the Eagles, Giants, Cowboys, and Football Team, the NFC East is currently having one of the worst starts for a division in NFL history. Naturally, bad teams do not have the best stats, which is likely why my model excluded all of the NFC East.
+```{r}
+## Box M Test
+boxM(NFL[,7:36], NFL$Playoffs)
+
+boxM(NFLReduced[,1:8], NFLReduced$`NFL$Playoffs`)
+
+# Prepping Data and Deciding On Prior Numbers
+NFLDA <- NFL %>% dplyr::select(2, 6:36)
+NFLDA$Playoffs[NFLDA$Playoffs==0] ="No"
+NFLDA$Playoffs[NFLDA$Playoffs==1] = "Yes"
+NFLPlayoffCount <- NFLDA %>% group_by(Playoffs) %>% tally()
+NFLPlayoffCount
+PlayoffRatioAllTime = 550/(927+550)
+PlayoffRatioAllTime
+PlayoffRatioCurrent = 14/32
+PlayoffRatioCurrent
+
+NFLDA$Playoffs <- as.factor(NFLDA$Playoffs)
+
+NFLDA <- NFLDA[order(NFLDA$Playoffs), ]
+
+
+# Analysis
+index.no <- c(1:927)
+index.yes <- c(928:1477)
+
+ 
+
+error.lda1 = c()
+error.lda2 = c()
+error.qda1 = c()
+error.qda2 = c()
+
+
+
+for(i in 1:100) {
+  train.index.no = sample(index.no, size= 618)
+  train.index.yes = sample(index.yes, size=367)
+  train.index = c(train.index.no, train.index.yes)
+  
+ 
+  
+  lda1 = lda(Playoffs~PassCmp+ PassAY.A+ PassY.C+ PassY.G+ PassTDG+ PassIntG+ PassSackG+ RushY.A+ RushY.G+ RushTDG+ RushFmbG+ PuntYds.R+ KickYds.R+ PuntRetTDG+ KickRetTDG+ APYdG+ FG+ XP+ Yds.Punt+ DefY.P+ DefRushY.A+ DefPAG+ DefTOG+ DefFirstDownG+ DefPassYdsG+ DefPassTDG+ DefRushYdsG+ DefRushTDG+ DefPenG+ DefPenFirstG, data=NFLDA, prior=c(.628, .372), CV=FALSE, subset = train.index)
+  
+  lda2 = lda(Playoffs~PassCmp+ PassAY.A+ PassY.C+ PassY.G+ PassTDG+ PassIntG+ PassSackG+ RushY.A+ RushY.G+ RushTDG+ RushFmbG+ PuntYds.R+ KickYds.R+ PuntRetTDG+ KickRetTDG+ APYdG+ FG+ XP+ Yds.Punt+ DefY.P+ DefRushY.A+ DefPAG+ DefTOG+ DefFirstDownG+ DefPassYdsG+ DefPassTDG+ DefRushYdsG+ DefRushTDG+ DefPenG+ DefPenFirstG, data=NFLDA, prior=c(.5625, .4375), CV=FALSE, subset = train.index)
+  
+  qda1= qda(Playoffs~PassCmp+ PassAY.A+ PassY.C+ PassY.G+ PassTDG+ PassIntG+ PassSackG+ RushY.A+ RushY.G+ RushTDG+ RushFmbG+ PuntYds.R+ KickYds.R+ PuntRetTDG+ KickRetTDG+ APYdG+ FG+ XP+ Yds.Punt+ DefY.P+ DefRushY.A+ DefPAG+ DefTOG+ DefFirstDownG+ DefPassYdsG+ DefPassTDG+ DefRushYdsG+ DefRushTDG+ DefPenG+ DefPenFirstG, data=NFLDA, prior=c(.628, .372), CV=FALSE, subset = train.index)
+  
+  qda2 = qda(Playoffs~PassCmp+ PassAY.A+ PassY.C+ PassY.G+ PassTDG+ PassIntG+ PassSackG+ RushY.A+ RushY.G+ RushTDG+ RushFmbG+ PuntYds.R+ KickYds.R+ PuntRetTDG+ KickRetTDG+ APYdG+ FG+ XP+ Yds.Punt+ DefY.P+ DefRushY.A+ DefPAG+ DefTOG+ DefFirstDownG+ DefPassYdsG+ DefPassTDG+ DefRushYdsG+ DefRushTDG+ DefPenG+ DefPenFirstG, data=NFLDA, prior=c(.5625, .4375), CV=FALSE, subset = train.index)
+  
+  error.lda1[i] = 1 - mean(predict(lda1, NFLDA[-train.index, ])$class == NFLDA[-train.index, ]$Playoffs)
+  error.lda2[i] = 1 - mean(predict(lda2, NFLDA[-train.index, ])$class == NFLDA[-train.index, ]$Playoffs)
+
+  error.qda1[i] = 1 - mean(predict(qda1, NFLDA[-train.index, ])$class == NFLDA[-train.index, ]$Playoffs)
+error.qda2[i] = 1 - mean(predict(qda2, NFLDA[-train.index, ])$class == NFLDA[-train.index, ]$Playoffs)
+  
+}
+
+c(mean(error.lda1), mean(error.lda2), mean(error.qda1), mean(error.qda2))
+
+# Testing NFL 2020 data
+
+Predictions <- lda2 %>% predict(NFL2020[,7:36])
+PlayoffPredictions <- data.frame(NFL2020$Tm, Predictions$class)
+names <- c("Team", "Playoffs")
+colnames(PlayoffPredictions) <- names
+PlayoffPredictions
+
+```
+
+## Conclusions 
+
+With the NFL being a large league in terms of money, team sizes, and positions, it is invetable that models will likely be complex and not have straight foward answers. This appears to be the same case for most of my findings, however, there are a few things that I can conclude. For starters, special teams does in fact matter. Also, since special teams players are usually the cheapest, NFL general managers should target these positions to boost their teams success. Next, it is nearly impossible to pin down a specific position that will make or break an NFL team's season. My Bonferroni confidence intervals and principal component analysis provided convuluted results, suggesting that each aspect of the game is vital to a teams success. Finally, cluster analysis may be useful at creating tiers of teams, but discriminant analysis is the most useful in terms of predicting whether a team will make the playoffs without considering wins. 
+
+I believe that this analyis has one large limitation revolving around my discriminant analysis. I have already mentioned this, but my discriminant analysis had no knowledge of the division or conference structure within the NFL. Although the predictions still turned out very well, I think that they could be improved upon. In the future, one should construct an analysis to predict a division winner, and then construct a seperate analysis to predict the wildcard teams from the remaining teams. This will ensure that the correct format is followed and provide a more accurate. In the future, I would like to perform similar analyses to predict Superbowl winners, however this would likely be much less accurate because only 1/32 teams can win it. 
+
+## Citations
+
+Colangelo, M. (2019, July 16). The NFL made roughly $16 billion    in revenue last year. Retrieved November 21, 2020, from          https://touchdownwire.usatoday.com/2019/07/15/nfl-revenue-owner   s-players-billions/

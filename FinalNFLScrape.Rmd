@@ -1,0 +1,260 @@
+---
+title: "Final Project Draft"
+author: "Hunter Blum"
+date: "10/29/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(rvest)
+
+```
+
+#Collecting Team Records
+```{r}
+y0 <- 1970
+y <-  y0 + c(0:50)
+link=paste0("https://www.pro-football-reference.com/years/", y, "/")
+
+
+Records <- list()
+for(i in 1:51){
+  link.temp=link[i]
+  html <- read_html(link.temp)
+  
+  tables <- html_table(x=html, fill=TRUE)
+  AFC <- tables[[1]] %>% mutate(Year= y[[i]])
+  NFC <- tables[[2]] %>% mutate(Year = y[[i]])
+  
+  Records <- bind_rows(AFC, NFC, Records)
+}
+
+
+RecordsClean <- Records %>% filter(Tm!="AFC East", Tm!="AFC North", Tm!="AFC South", Tm!="AFC West", Tm!="NFC North", Tm!="NFC South", Tm!="NFC West", Tm!= "NFC East", Tm!="AFC Central", Tm!="NFC Central")
+
+Playoffs <- RecordsClean %>% mutate(Playoffs = ifelse(str_detect(RecordsClean$Tm, "[*+]"), 1, 0)) %>% mutate(Team = str_remove_all(RecordsClean$Tm, "[*+]")) 
+
+Playoffs$Team <- str_trim(Playoffs$Team)
+Playoffs$Tm <- Playoffs$Team
+
+RecordsFinal <- Playoffs %>% select(Tm:L, Year:Playoffs) 
+
+
+```
+
+# Offense and Special Teams
+```{r}
+y0= 1970
+y= y0 + c(0:50)
+link <- paste0("https://www.pro-football-reference.com/years/", y, "/#")
+
+
+
+
+Passing <- list()
+for(i in 1:51){
+  link.temp <- link[[i]]
+  page <- read_html(link.temp)
+  
+temp <- page %>% html_node('body') %>% html_node('#all_passing') %>% html_nodes(xpath='comment()') %>% html_text() %>% read_html() %>% html_node('table') %>% html_table()
+
+
+temp$Year <- y[[i]]
+
+Passing <-  bind_rows(Passing, temp)
+
+}
+
+PassingClean <- Passing %>% filter(Rk!= "", Rk!="Rk")
+PassingClean <- PassingClean  %>% select(Tm:Year)
+PassingClean$Tm <- str_trim(PassingClean$Tm)
+PassingClean <- PassingClean %>% rename(PassCmp= Cmp, PassAtt=Att, `PassCmp%` = `Cmp%`,  PassTD = TD, `PassTD%`=`TD%`, PassInt = Int, `PassInt%`=`Int%`, PassLng=Lng, `PassY/A`= `Y/A`, `PassAY/A`= `AY/A`, `PassY/C` = `Y/C`, `PassY/G`= `Y/G`, PassRate=Rate, PassSack= Sk,  `PassNY/A`= `NY/A`, `PassANY/A`= `ANY/A`, `PassSack%` = `Sk%`, `Pass4QC`= `4QC`, PassGWD=GWD )
+
+PassingClean <- PassingClean %>% mutate(PassAttG= PassAtt/G,  PassTDG = PassTD/G, PassIntG=PassInt/G, PassSackG= PassSack/G)
+
+PassingFinal <- PassingClean %>% select(Tm, `PassCmp%`, `PassTD%`, PassLng:PassRate,`PassNY/A`:`PassSack%`, Year: PassSackG )
+  
+  
+Rushing <- list()
+for(i in 1:51){
+  link.temp <- link[[i]]
+  page <- read_html(link.temp)
+  temp <- page %>% html_node('body') %>% html_node('#all_rushing') %>% html_nodes(xpath='comment()') %>% html_text() %>% read_html() %>% html_node('table') %>% html_table() 
+  
+  temp$Year <- y[[i]]
+  
+  Rushing <- bind_rows(Rushing, temp)
+}
+
+RushingClean <- Rushing %>% filter(Rk!="Rk", Rk!="")
+RushingClean <- RushingClean %>% select(Tm:Year)
+RushingClean$Tm <- str_trim(RushingClean$Tm)
+RushingClean <- RushingClean %>% rename(RushAtt=Att, RushYds=Yds, RushTD=TD, RushLng=Lng, `RushY/A`=`Y/A`, `RushY/G`= `Y/G`, RushFmb=Fmb)
+
+RushingClean <- RushingClean %>% mutate(RushAttG = RushAtt/G, RushTDG=RushTD/G, RushFmbG= RushFmb/G)
+
+RushingFinal <- RushingClean %>% select(Tm, RushLng:`RushY/G`, Year:RushFmbG)
+  
+Returns <- list()
+for(i in 1:51){
+link.temp <- link[[i]]
+page <- read_html(link.temp)
+
+  
+temp <- page %>% html_node('body') %>% html_node('#all_returns') %>% html_nodes(xpath='comment()') %>% html_text() %>% read_html() %>% html_node('table') %>% html_table() 
+
+temp$Year <- y[[i]]
+
+Returns <- rbind(Returns, temp)
+}
+
+names <- Returns[1,]
+colnames(Returns) <- names
+
+
+ReturnsClean <- subset(Returns, Rk!="Rk")
+ReturnsClean <- subset(ReturnsClean, Rk!="")
+ReturnsClean$`1970` -> ReturnsClean$Year
+
+ReturnsClean <- ReturnsClean %>% select(Tm:APYd, Year)
+ReturnsClean$Tm <- str_trim(ReturnsClean$Tm)
+ReturnsClean <- ReturnsClean %>% rename(PuntRet = Ret, PuntRetYds= Yds, PuntRetTD = TD, PuntRetLng= Lng, `PuntYds/R`= `Y/R`, KickRet= Rt, KickRetYds= `Yds.1`, KickRetTD = `TD.1`, KickRetLng= `Lng.1`, `KickYds/R`=`Y/Rt`)
+
+ReturnsClean$G <- as.numeric(ReturnsClean$G)
+ReturnsClean$PuntRetTD <- as.numeric(ReturnsClean$PuntRetTD)
+ReturnsClean$KickRetTD<- as.numeric(ReturnsClean$KickRetTD)
+ReturnsClean$APYd <- as.numeric(ReturnsClean$APYd)
+
+
+
+
+ReturnsClean <- ReturnsClean %>% mutate(PuntRetTDG= PuntRetTD/G, KickRetTDG=KickRetTD/G, APYdG= APYd/G)
+
+ReturnsFinal <- ReturnsClean %>% select(Tm, PuntRetLng:`PuntYds/R`, KickRetLng:APYdG)
+
+Kicking <- list()
+for(i in 1:51){
+  link.temp <- link[[i]]
+  page <- read_html(link.temp)
+temp <- page %>% html_node('body') %>% html_node('#all_kicking') %>% html_nodes(xpath='comment()') %>% html_text() %>% read_html() %>% html_node('table') %>% html_table() 
+
+temp$Year <- y[[i]]
+
+Kicking <- rbind(Kicking, temp)
+}
+
+names<- Kicking[1,]
+colnames(Kicking) <- names
+
+KickingClean <- subset(Kicking, Rk!="Rk")
+KickingClean <- subset(KickingClean, Rk!="")
+KickingClean$`1970` -> KickingClean$Year
+
+KickingClean <- KickingClean %>% select(Tm:`Y/P`, Year)
+KickingClean$Tm <- str_trim(KickingClean$Tm)
+KickingClean <- KickingClean %>% rename(FGLng=Lng, PuntLng=`Lng.1`, `Yds/Punt`=`Y/P`)
+
+KickingFinal <- KickingClean %>% select(Tm, FGLng:`FG%`, `XP%`, `TB%`, KOAvg, `Yds/Punt`:Year)
+
+```
+
+
+# Defense
+```{r}
+y0=1970
+y=y0 + c(0:50)
+link= paste0("https://www.pro-football-reference.com/years/",y,"/opp.htm")
+
+TeamDefense <- list()
+for(i in 1:51){
+  link.temp=link[i]
+  html <- read_html(link.temp)
+  tables <- html_table(x=html, fill=TRUE)
+  
+  temp <- tables[[1]]
+  temp$Year <- y[[i]]
+ 
+    
+    
+  TeamDefense <- bind_rows(temp, TeamDefense)
+  
+}
+
+
+names <- c("Rk", "Tm", "G", "PF",  "TotYds", "Ply", "Y/P", "TO", "FL", "FirstDown", "Cmp", "PassAtt", "PassYds", "PassTD", "Int", "NY/A", "PassFirstDown", "RushAtt", "RushYds", "RushTD", "RushY/A", "RushFirstDown", "Pen", "PenYds", "PenFirst", "PercentScore", "PercentTO", "Exp", "Year")
+
+
+colnames(TeamDefense) <- names
+TeamDefenseClean <- TeamDefense %>% filter(Rk!="", Rk!="Rk")
+
+TeamDefenseClean <- TeamDefenseClean %>% rename(DefPA= PF, DefTotYds=TotYds, DefPly= Ply, `DefY/P`= `Y/P`, DefTO=TO, DefFum=FL, DefFirstDown= FirstDown, DefCmp=Cmp, DefPassAtt= PassAtt, DefPassYds= PassYds, DefPassTD= PassTD, DefInt= Int, `DefNY/A`= `NY/A`, DefPassFD= PassFirstDown, DefRushAtt= RushAtt, DefRushYds= RushYds, `DefRushY/A`=`RushY/A`, DefRushFD= RushFirstDown, DefPen= Pen, DefPenYds=PenYds, DefPenFirst= PenFirst, DefPercentScore= PercentScore, DefPercentTO = PercentTO, DefRushTD= RushTD)
+
+TeamDefenseClean <- TeamDefenseClean %>% select(!Exp) 
+
+TeamDefenseClean$Tm <- str_trim(TeamDefenseClean$Tm)
+
+TeamDefenseClean$G <- as.numeric(TeamDefenseClean$G)
+TeamDefenseClean$DefPA <- as.numeric(TeamDefenseClean$DefPA)
+TeamDefenseClean$DefTotYds <- as.numeric(TeamDefenseClean$DefTotYds)
+TeamDefenseClean$DefPly <- as.numeric(TeamDefenseClean$DefPly)
+TeamDefenseClean$`DefY/P` <- as.numeric(TeamDefenseClean$`DefY/P`)
+TeamDefenseClean$DefTO <- as.numeric(TeamDefenseClean$DefTO)
+TeamDefenseClean$DefFum <- as.numeric(TeamDefenseClean$DefFum)
+TeamDefenseClean$DefFirstDown <- as.numeric(TeamDefenseClean$DefFirstDown)
+TeamDefenseClean$DefCmp <- as.numeric(TeamDefenseClean$DefCmp)
+TeamDefenseClean$DefPassAtt <- as.numeric(TeamDefenseClean$DefPassAtt)
+TeamDefenseClean$DefPassYds <- as.numeric(TeamDefenseClean$DefPassYds)
+TeamDefenseClean$DefPassTD <- as.numeric(TeamDefenseClean$DefPassTD)
+TeamDefenseClean$DefInt <- as.numeric(TeamDefenseClean$DefInt)
+TeamDefenseClean$`DefNY/A` <- as.numeric(TeamDefenseClean$`DefNY/A`)
+TeamDefenseClean$DefPassFD <- as.numeric(TeamDefenseClean$DefPassFD)
+TeamDefenseClean$DefRushAtt <- as.numeric(TeamDefenseClean$DefRushAtt)
+TeamDefenseClean$DefRushYds <- as.numeric(TeamDefenseClean$DefRushYds)
+TeamDefenseClean$DefRushTD <- as.numeric(TeamDefenseClean$DefRushTD)
+TeamDefenseClean$`DefRushY/A` <- as.numeric(TeamDefenseClean$`DefRushY/A`)
+TeamDefenseClean$DefRushFD <- as.numeric(TeamDefenseClean$DefRushFD)
+TeamDefenseClean$DefPen <- as.numeric(TeamDefenseClean$DefPen)
+TeamDefenseClean$DefPenYds <- as.numeric(TeamDefenseClean$DefPenYds)
+TeamDefenseClean$DefPenFirst <- as.numeric(TeamDefenseClean$DefPenFirst)
+TeamDefenseClean$DefPercentScore <- as.numeric(TeamDefenseClean$DefPercentScore)
+TeamDefenseClean$DefPercentTO <- as.numeric(TeamDefenseClean$DefPercentTO)
+
+
+
+
+TeamDefenseClean <- TeamDefenseClean %>% mutate(DefPAG= DefPA/G, DefTotYds=DefTotYds/G, DefTOG=DefTO/G, DefFirstDownG= DefFirstDown/G, DefCmpG= DefCmp/G, DefPassYdsG= DefPassYds/G, DefPassTDG= DefPassTD/G, DefIntG= DefInt/G, DefPassFDG= DefPassFD/G, DefRushYdsG= DefRushYds/G, DefRushTDG= DefRushTD/G, DefRushFDG=DefRushFD/G, DefPenG=DefPen/G, DefPenYdsG= DefPenYds/G, DefPenFirstG= DefPenFirst/G)
+
+TeamDefenseFinal <- TeamDefenseClean %>% select(Tm, `DefY/P`, `DefNY/A`, `DefRushY/A`, DefPercentScore, Year:DefPenFirstG)
+
+```
+
+#Combine Everything
+```{r}
+
+NFL <- left_join(RecordsFinal, PassingFinal,  by=c("Tm", "Year"))
+NFL <- left_join(NFL, RushingFinal, by=c("Tm", "Year"))
+NFL <- left_join(NFL, ReturnsFinal, by=c("Tm", "Year"))
+NFL <- left_join(NFL, KickingFinal, by=c("Tm", "Year"))
+NFL <- left_join(NFL, TeamDefenseFinal, by=c("Tm", "Year"))
+
+
+
+write.csv(NFL, file= "NFL.csv")
+
+```
+
+# Add Superbowl Winner
+```{r}
+Superbowl <- read.csv("Superbowl.csv")
+Superbowl$ï..Year -> Superbowl$Year
+Superbowl <- Superbowl %>% select(!ï..Year)
+NFL <- left_join(NFL, Superbowl, by = c("Tm", "Year")) 
+NFL$Superbowl[is.na(NFL$Superbowl)] <- 0
+
+write.csv(NFL, file = "NFL.csv")
+```
